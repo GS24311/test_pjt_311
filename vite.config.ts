@@ -18,6 +18,9 @@ export default defineConfig(({mode}) => {
           short_name: '네언해',
           description: 'AI 기반 건강한 대화 분석 및 코칭 서비스',
           theme_color: '#FF7D7D',
+          background_color: '#fcfcf9',
+          display: 'standalone',
+          start_url: '/',
           icons: [
             {
               src: 'pwa-192x192.png',

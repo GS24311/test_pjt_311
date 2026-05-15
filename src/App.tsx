@@ -1,19 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
-import { onAuthStateChanged, User, signOut, signInWithPopup } from 'firebase/auth';
+import { onAuthStateChanged, User, signOut, getRedirectResult } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db, googleProvider, testConnection } from './lib/firebase';
+import { auth, db, testConnection } from './lib/firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   MessageSquare, 
-  User as UserIcon, 
   Brain, 
   LogOut, 
-  Plus, 
-  ArrowLeft,
   Sparkles,
-  Heart,
-  AlertCircle,
   History
 } from 'lucide-react';
 
@@ -31,6 +26,12 @@ export default function App() {
 
   useEffect(() => {
     testConnection();
+
+    // Handle redirect result for PWA mode
+    getRedirectResult(auth).catch(err => {
+      console.error("Redirect auth error:", err);
+    });
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         // Ensure user exists in Firestore
