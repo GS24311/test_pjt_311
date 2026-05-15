@@ -1,10 +1,11 @@
 import { 
   signInWithPopup, 
-  signInWithRedirect
+  signInWithRedirect,
+  signInAnonymously
 } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
 import { motion } from 'motion/react';
-import { Sparkles, AlertCircle } from 'lucide-react';
+import { Sparkles, AlertCircle, Eye } from 'lucide-react';
 import { useState } from 'react';
 
 export default function LandingPage() {
@@ -31,6 +32,23 @@ export default function LandingPage() {
       }
     } catch (err: any) {
       setError("로그인 중 예기치 못한 오류가 발생했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await signInAnonymously(auth);
+    } catch (err: any) {
+      console.error("Guest login error:", err);
+      if (err.code === 'auth/operation-not-allowed') {
+        setError("익명 로그인이 비활성화되어 있습니다. Firebase 콘솔에서 Anonymous 설정을 켜주세요.");
+      } else {
+        setError("게스트 로그인을 시작할 수 없습니다.");
+      }
     } finally {
       setLoading(false);
     }
@@ -69,22 +87,33 @@ export default function LandingPage() {
             </div>
           )}
 
-          <button
-            onClick={handleLogin}
-            disabled={loading}
-            className="w-full bg-primary text-white py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
-          >
-            {loading ? "연결 중..." : (
-              <>
-                <img src="https://www.google.com/favicon.ico" className="w-4 h-4 brightness-0 invert" alt="" />
-                Google 계정으로 시작
-              </>
-            )}
-          </button>
+          <div className="space-y-3">
+            <button
+              onClick={handleLogin}
+              disabled={loading}
+              className="w-full bg-primary text-white py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
+            >
+              {loading ? "연결 중..." : (
+                <>
+                  <img src="https://www.google.com/favicon.ico" className="w-4 h-4 brightness-0 invert" alt="" />
+                  Google 계정으로 시작
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleGuestLogin}
+              disabled={loading}
+              className="w-full bg-white border border-gray-200 text-gray-600 py-4 rounded-2xl font-bold hover:bg-gray-50 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
+            >
+              <Eye className="w-4 h-4" />
+              로그인 없이 둘러보기
+            </button>
+          </div>
 
           <p className="text-[10px] text-gray-400 font-medium leading-relaxed px-4">
-            구글 계정으로 간편하게 가입하고<br/>
-            나의 대화 성향을 분석해보세요.
+            계정 없이 시작할 경우, 브라우저를 종료하거나<br/>
+            기기를 변경하면 데이터가 보관되지 않습니다.
           </p>
         </div>
 
