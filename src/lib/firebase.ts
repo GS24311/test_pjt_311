@@ -1,11 +1,29 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from 'firebase/auth';
+import { getFirestore, doc, getDocFromServer, enableIndexedDbPersistence } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Enable offline persistence
+if (typeof window !== 'undefined') {
+  enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      console.warn("Firestore persistence failed: Multiple tabs open");
+    } else if (err.code === 'unimplemented') {
+      console.warn("Firestore persistence failed: Browser not supported");
+    }
+  });
+}
+
 export const auth = getAuth(app);
+
+// Explicitly set persistence to ensure it survives refreshes in iFrames
+setPersistence(auth, browserLocalPersistence).catch(err => {
+  console.error("Auth persistence error:", err);
+});
+
 export const googleProvider = new GoogleAuthProvider();
 
 export async function testConnection() {

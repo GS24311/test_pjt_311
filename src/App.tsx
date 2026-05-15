@@ -33,29 +33,36 @@ export default function App() {
     });
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Ensure user exists in Firestore
-        const userRef = doc(db, 'users', user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            uid: user.uid,
-            name: user.displayName || 'Anonymous',
-            email: user.email,
-            traitProfile: {
-              attachmentStyle: 'Unknown',
-              communicationStyle: 'Evaluating...',
-              triggers: [],
-              notes: ''
-            },
-            createdAt: serverTimestamp()
-          });
+      try {
+        if (user) {
+          // Ensure user exists in Firestore
+          const userRef = doc(db, 'users', user.uid);
+          const userSnap = await getDoc(userRef);
+          if (!userSnap.exists()) {
+            const defaultName = user.displayName || (user.isAnonymous ? '게스트' : '익명');
+            await setDoc(userRef, {
+              uid: user.uid,
+              name: defaultName,
+              email: user.email || null,
+              traitProfile: {
+                attachmentStyle: '기본형',
+                communicationStyle: '분석 준비중...',
+                triggers: [],
+                notes: ''
+              },
+              createdAt: serverTimestamp()
+            });
+          }
+          setUser(user);
+        } else {
+          setUser(null);
         }
-        setUser(user);
-      } else {
-        setUser(null);
+      } catch (err) {
+        console.error("Auth state handling error:", err);
+        if (user) setUser(user);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
     return unsubscribe;
   }, []);

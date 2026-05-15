@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, orderBy, getDocs, addDoc, serverTimestamp, limit, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, addDoc, serverTimestamp, limit, deleteDoc, doc, writeBatch, getDoc, onSnapshot } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Conversation } from '../types';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, MessageSquare, Clock, ChevronRight, Play, User as UserIcon, Sparkles, Mic, MicOff, Trash2, Info, RefreshCw, Zap, Target, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { generateConversationTitle } from '../lib/gemini';
 
 function MissionCard() {
   const [completed, setCompleted] = useState(false);
@@ -126,23 +127,47 @@ export default function Dashboard() {
     { id: '2', name: '상대방', role: 'partner' }
   ]);
   const [isUploading, setIsUploading] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchConversations = async () => {
-      if (!auth.currentUser) return;
-      const q = query(
-        collection(db, 'users', auth.currentUser.uid, 'conversations'),
-        orderBy('lastMessageAt', 'desc'),
-        limit(5)
-      );
-      const querySnapshot = await getDocs(q);
-      const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Conversation));
+    if (!auth.currentUser) return;
+    
+    setLoading(true);
+
+    // Fetch user profile separately
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    getDoc(userRef).then(snap => {
+      if (snap.exists()) setUserProfile(snap.data());
+    }).catch(err => console.error("Profile fetch error:", err));
+
+    // Real-time listener for conversations
+    // Using createdAt as a more stable primary sort for newly created ones
+    const q = query(
+      collection(db, 'users', auth.currentUser.uid, 'conversations'),
+      orderBy('createdAt', 'desc'),
+      limit(20)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      } as Conversation));
+      console.log("Dashboard snapshots - count:", list.length);
       setConversations(list);
       setLoading(false);
-    };
-    fetchConversations();
-  }, []);
+    }, (error) => {
+      console.error("Dashboard onSnapshot error:", error);
+      // Some errors might be due to missing index on lastMessageAt if we changed it
+      // Let's ensure loading is disabled so user sees 'empty' state vs eternal spinner
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [auth.currentUser]);
 
   const startNewConversation = async () => {
     if (!auth.currentUser || analyzing) return;
@@ -152,35 +177,43 @@ export default function Dashboard() {
     if (tempMessages.length > 0) {
       messagesToSave = tempMessages;
     } else if (inputText.trim()) {
-      // Auto-parse if multi-line transcript is pasted
+      // Auto-parse transcript
       const lines = inputText.trim().split('\n').filter(l => l.trim());
-      const hasSeparators = lines.some(l => l.includes(':') || l.includes('：'));
       
-      if (hasSeparators) {
+      // Heuristic: if many lines, try to split by colon.
+      // If no colons, treat as dialogue swap (User -> Partner -> User)
+      const hasColons = lines.some(l => l.includes(':') || l.includes('：'));
+      
+      if (hasColons) {
         messagesToSave = lines.map((line, i) => {
-          let role: 'user' | 'partner' = 'user';
-          let senderName = '나';
+          let role: 'user' | 'partner' = i % 2 === 0 ? 'user' : 'partner';
+          let senderName = i % 2 === 0 ? '나' : '상대방';
           let content = line;
 
           const separator = line.includes(':') ? ':' : (line.includes('：') ? '：' : null);
           if (separator) {
             const parts = line.split(separator);
-            senderName = parts[0].trim();
+            const namePart = parts[0].trim();
             content = parts.slice(1).join(separator).trim();
             
-            const lowerName = senderName.toLowerCase();
-            if (lowerName === '나' || lowerName === 'me' || lowerName === '본인' || lowerName === '나님' || lowerName === 'a') {
+            const lowerName = namePart.toLowerCase();
+            if (['나', 'me', 'i', '본인', '나님', 'a', '나:'].includes(lowerName)) {
               role = 'user';
               senderName = '나';
             } else {
               role = 'partner';
+              senderName = namePart;
             }
-          } else if (i % 2 !== 0) {
-            role = 'partner';
-            senderName = '상대방';
           }
           return { role, senderName, content: content || line };
         });
+      } else if (lines.length > 1) {
+        // No colons but multiple lines - alternating
+        messagesToSave = lines.map((line, i) => ({
+          role: i % 2 === 0 ? 'user' : 'partner',
+          senderName: i % 2 === 0 ? '나' : '상대방',
+          content: line
+        }));
       } else {
         messagesToSave = [{ role: 'user', senderName: '나', content: inputText.trim() }];
       }
@@ -192,36 +225,56 @@ export default function Dashboard() {
     const path = `users/${auth.currentUser.uid}/conversations`;
 
     try {
-      const firstContent = messagesToSave[0].content;
-      const title = firstContent.length > 30 ? firstContent.substring(0, 30) + '...' : firstContent;
+      // 1. Generate title (Date-based as requested)
+      const now_date = new Date();
+      const title = `${now_date.getFullYear()}-${String(now_date.getMonth() + 1).padStart(2, '0')}-${String(now_date.getDate()).padStart(2, '0')} ${String(now_date.getHours()).padStart(2, '0')}:${String(now_date.getMinutes()).padStart(2, '0')}`;
       
-      const docRef = await addDoc(collection(db, 'users', auth.currentUser.uid, 'conversations'), {
+      // 2. Prepare the main conversation document with a pre-generated ID
+      const convsRef = collection(db, 'users', auth.currentUser.uid, 'conversations');
+      const docRef = doc(convsRef);
+      
+      const batch = writeBatch(db);
+      const now_val = serverTimestamp();
+      
+      batch.set(docRef, {
         userId: auth.currentUser.uid,
-        title: title || `새로운 대화 분석 (${new Date().toLocaleDateString()})`,
+        title: title.slice(0, 100),
         status: 'active',
-        lastMessageAt: serverTimestamp(),
-        createdAt: serverTimestamp()
+        lastMessageAt: now_val,
+        createdAt: now_val
       });
 
-      // Save messages in sequence using count as order
-      for (let i = 0; i < messagesToSave.length; i++) {
-        const msg = messagesToSave[i];
-        await addDoc(collection(db, 'users', auth.currentUser.uid, 'conversations', docRef.id, 'messages'), {
-          content: msg.content,
+      // 3. Add all messages to batch
+      messagesToSave.forEach((msg, i) => {
+        const msgRef = doc(collection(db, 'users', auth.currentUser!.uid, 'conversations', docRef.id, 'messages'));
+        batch.set(msgRef, {
+          content: msg.content.slice(0, 15000), // Safety truncation
           role: msg.role,
-          senderName: msg.senderName,
+          senderName: msg.senderName.slice(0, 50),
           order: i,
-          createdAt: serverTimestamp()
+          createdAt: now_val
         });
-      }
+      });
 
+      // 4. Commit all at once
+      console.log("Committing batch for new conversation:", docRef.id);
+      await batch.commit();
+      console.log("Batch committed successfully");
+
+      // Notify completion and close the input "window"
       setShowOptions(false);
       setTempMessages([]);
       setInputText('');
-      navigate(`/chat/${docRef.id}`);
-    } catch (error) {
+      
+      alert('대화가 목록에 추가되었습니다. 분석이 순차적으로 진행됩니다!');
+    } catch (error: any) {
       console.error('Error starting conversation:', error);
-      handleFirestoreError(error, OperationType.WRITE, path);
+      alert('분석을 시작할 수 없습니다. 나중에 다시 시도해주세요.');
+      try {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      } catch (e) {
+        // Silently catch the error thrown by handler as it is meant for diagnostic logging
+      }
     } finally {
       setAnalyzing(false);
     }
@@ -279,32 +332,24 @@ export default function Dashboard() {
     }
   };
 
-  const deleteConversation = async (e: React.MouseEvent, id: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
+  const deleteConversation = async (id: string) => {
     if (!auth.currentUser || !id) return;
     
-    // Temporarily removing confirm to test if it was being blocked
-    const path = `users/${auth.currentUser.uid}/conversations/${id}`;
+    setDeletingId(id);
     
     try {
-      // Optimistic UI update
-      setConversations(prev => prev.filter(c => c.id !== id));
-      await deleteDoc(doc(db, 'users', auth.currentUser.uid, 'conversations', id));
-    } catch (error) {
-      console.error('Error deleting conversation:', error);
-      // Revert optimistic update
-      const q = query(
-        collection(db, 'users', auth.currentUser.uid, 'conversations'),
-        orderBy('lastMessageAt', 'desc'),
-        limit(5)
-      );
-      const querySnapshot = await getDocs(q);
-      const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Conversation));
-      setConversations(list);
+      console.log("EXEC: Deleting document with ID:", id);
+      const docRef = doc(db, 'users', auth.currentUser.uid, 'conversations', id);
+      await deleteDoc(docRef);
+      console.log("SUCCESS: Document deleted from Firestore");
       
-      handleFirestoreError(error, OperationType.DELETE, path);
+      // Close modal and clear state
+      setConfirmDeleteId(null);
+    } catch (error: any) {
+      console.error('FAIL: Firestore delete error:', error);
+      alert('삭제 중 오류가 발생했습니다. 권한이나 연결을 확인해주세요.\n' + (error.message || ''));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -338,6 +383,17 @@ export default function Dashboard() {
     }
   };
 
+  const welcomeName = userProfile?.name || auth.currentUser?.displayName?.split(' ')[0] || (auth.currentUser?.isAnonymous ? '게스트' : '사용자');
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <RefreshCw className="w-8 h-8 text-primary animate-spin" />
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">데이터를 불러오는 중...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Welcome Header */}
@@ -348,7 +404,7 @@ export default function Dashboard() {
           </div>
           <div className="overflow-hidden">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">인증됨</p>
-            <h2 className="text-xl font-display font-bold truncate">환영합니다, {auth.currentUser?.displayName?.split(' ')[0].toLowerCase() || '사용자'}님!</h2>
+            <h2 className="text-xl font-display font-bold truncate">환영합니다, {welcomeName}님!</h2>
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -400,6 +456,11 @@ export default function Dashboard() {
                 <div className="flex items-center gap-3">
                    <MessageSquare className="w-6 h-6" />
                    <h3 className="text-xl font-display font-bold">대화 구성하기</h3>
+                   {tempMessages.length > 0 && (
+                     <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                       {tempMessages.length}개 저장됨
+                     </span>
+                   )}
                 </div>
                 <button 
                   onClick={() => { setShowOptions(false); setTempMessages([]); setInputText(''); }} 
@@ -535,7 +596,7 @@ export default function Dashboard() {
                       ) : (
                         <>
                           <Sparkles className="w-4 h-4" />
-                          <span className="text-[10px] font-bold uppercase tracking-widest">분석 시작</span>
+                          <span className="text-[10px] font-bold uppercase tracking-widest">저장하기 & 분석하기</span>
                         </>
                       )}
                     </button>
@@ -551,47 +612,128 @@ export default function Dashboard() {
       <div className="space-y-4">
         <div className="flex justify-between items-center px-2">
           <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">최근 대화 목록</h4>
-          <Link to="/dashboard" className="text-[10px] font-bold uppercase tracking-widest text-secondary hover:underline">전체 보기</Link>
+          <div className="flex gap-4">
+            <button 
+              onClick={() => {
+                // Remove window.location.reload() which is too slow
+                // Real-time listener already handles updates, but let's re-trigger it to be sure
+                setLoading(true);
+                setTimeout(() => setLoading(false), 500);
+              }}
+              className="text-[10px] font-bold uppercase tracking-widest text-gray-400 hover:text-primary flex items-center gap-1"
+            >
+              <RefreshCw className="w-3 h-3" />
+              새로고침
+            </button>
+            <Link to="/dashboard" className="text-[10px] font-bold uppercase tracking-widest text-secondary hover:underline">전체 보기</Link>
+          </div>
         </div>
         
         <div className="space-y-3">
-          {conversations.map((conv) => (
-            <div key={conv.id} className="flex gap-2">
-              <Link
-                to={`/chat/${conv.id}`}
-                className="flex-1 flex items-center justify-between bg-white p-5 rounded-[28px] border border-[#e5e5d8] hover:shadow-md transition-all group"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-accent group-hover:bg-primary group-hover:text-white rounded-xl transition-colors">
-                    <MessageSquare className="w-5 h-5" />
+          {conversations.length > 0 ? (
+            conversations.map((conv) => (
+              <div key={conv.id} className="flex gap-2">
+                <Link
+                  to={`/chat/${conv.id}`}
+                  className="flex-1 flex items-center justify-between bg-white p-5 rounded-[28px] border border-[#e5e5d8] hover:shadow-md transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-accent group-hover:bg-primary group-hover:text-white rounded-xl transition-colors">
+                      <MessageSquare className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-sm">{conv.title}</h5>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
+                        {conv.lastMessageAt?.toDate ? conv.lastMessageAt.toDate().toLocaleDateString() : '방금'}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h5 className="font-bold text-sm">{conv.title}</h5>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
-                      {conv.lastMessageAt?.toDate().toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-primary transition-colors" />
-              </Link>
-              <button
-                onClick={() => navigate(`/replay/${conv.id}`)}
-                className="p-5 bg-white border border-[#e5e5d8] rounded-[28px] text-gray-400 hover:text-primary hover:border-primary transition-all shadow-sm"
-                title="시뮬레이션"
-              >
-                <Play className="w-5 h-5 fill-current" />
-              </button>
-              <button
-                onClick={(e) => deleteConversation(e, conv.id)}
-                className="p-5 bg-white border border-[#e5e5d8] rounded-[28px] text-gray-400 hover:text-red-500 hover:border-red-500 transition-all shadow-sm"
-                title="삭제"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
+                  <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-primary transition-colors" />
+                </Link>
+                <button
+                  id={`replay-btn-${conv.id}`}
+                  onClick={() => navigate(`/replay/${conv.id}`)}
+                  className="p-5 bg-white border border-[#e5e5d8] rounded-[28px] text-gray-400 hover:text-primary hover:border-primary transition-all shadow-sm flex-shrink-0"
+                  title="시뮬레이션"
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                </button>
+                <button
+                  id={`delete-btn-${conv.id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setConfirmDeleteId(conv.id);
+                  }}
+                  disabled={deletingId === conv.id}
+                  className="p-5 bg-white border border-[#e5e5d8] rounded-[28px] text-gray-400 hover:text-red-500 hover:border-red-500 transition-all shadow-sm flex items-center justify-center min-w-[64px] flex-shrink-0"
+                  title="삭제"
+                >
+                  {deletingId === conv.id ? (
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="bg-white p-12 rounded-[40px] border border-dashed border-[#e5e5d8] text-center space-y-4">
+              <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto text-gray-300">
+                <MessageSquare className="w-8 h-8" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-gray-900">저장된 대화가 없습니다</p>
+                <p className="text-xs text-gray-400 mt-1 font-medium">새로운 분석을 시작해보세요!</p>
+              </div>
             </div>
-          ))}
+          )}
         </div>
       </div>
+      {/* Custom Delete Confirmation Modal */}
+      <AnimatePresence>
+        {confirmDeleteId && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmDeleteId(null)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative bg-white p-8 rounded-[40px] shadow-2xl max-w-sm w-full text-center space-y-6"
+            >
+              <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto text-red-500">
+                <Trash2 className="w-10 h-10" />
+              </div>
+              <div>
+                <h3 className="text-xl font-display font-bold text-gray-900">정말 삭제할까요?</h3>
+                <p className="text-sm text-gray-500 mt-2">삭제된 대화 기록은 복구할 수 없습니다.</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  id="cancel-delete-btn"
+                  onClick={() => setConfirmDeleteId(null)}
+                  className="flex-1 py-4 rounded-[24px] bg-gray-100 font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  id="confirm-delete-btn"
+                  onClick={() => deleteConversation(confirmDeleteId)}
+                  className="flex-1 py-4 rounded-[24px] bg-red-500 text-white font-bold hover:bg-red-600 shadow-lg shadow-red-200 transition-all"
+                >
+                  삭제하기
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

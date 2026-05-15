@@ -38,5 +38,8 @@ export interface Message {
     intent: string;
     advice: string;
     mistakeFilter: string;
+    empathyScore?: number;
+    clarityScore?: number;
+    resilienceScore?: number;
   };
 }

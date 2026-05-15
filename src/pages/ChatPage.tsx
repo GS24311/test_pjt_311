@@ -1,10 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, addDoc, serverTimestamp, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, addDoc, serverTimestamp, doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Conversation, Message, UserProfile } from '../types';
 import { analyzeMessage } from '../lib/gemini';
 import { motion, AnimatePresence } from 'motion/react';
+
+// ... (icons imports)
 import { 
   ArrowLeft, 
   Send, 
@@ -38,87 +40,91 @@ export default function ChatPage() {
   useEffect(() => {
     if (!id || !auth.currentUser) return;
     
-    const fetchData = async () => {
-      try {
-        const convRef = doc(db, 'users', auth.currentUser!.uid, 'conversations', id);
-        const convSnap = await getDoc(convRef);
-        if (convSnap.exists()) {
-          setConversation({ id: convSnap.id, ...convSnap.data() } as Conversation);
-        }
+    // 1. Fetch user profile
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    getDoc(userRef).then(snap => {
+      if (snap.exists()) setUserProfile(snap.data() as UserProfile);
+    });
 
-        const userRef = doc(db, 'users', auth.currentUser!.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          setUserProfile(userSnap.data() as UserProfile);
-        }
-
-        const q = query(
-          collection(db, 'users', auth.currentUser!.uid, 'conversations', id, 'messages'),
-          orderBy('order', 'asc')
-        );
-        const msgSnap = await getDocs(q);
-        const msgs = msgSnap.docs.map(d => ({ id: d.id, ...d.data() } as Message));
-        
-        let finalMsgs = msgs;
-        // Fallback for old messages without order
-        if (msgs.length > 0 && msgs[0].order === undefined) {
-           const timeQ = query(
-             collection(db, 'users', auth.currentUser!.uid, 'conversations', id, 'messages'),
-             orderBy('createdAt', 'asc')
-           );
-           const timeSnap = await getDocs(timeQ);
-           finalMsgs = timeSnap.docs.map(d => ({ id: d.id, ...d.data() } as Message));
-        }
-        setMessages(finalMsgs);
-
-        // Sequential analysis for all messages without analysis
-        const toAnalyze = finalMsgs.filter(m => !m.analysis);
-        if (toAnalyze.length > 0) {
-          setAutoAnalyzing(true);
-          
-          try {
-            const traitProfile = userSnap.data()?.traitProfile;
-
-            // Analyze messages one by one to avoid 429 (Rate Limit)
-            // Use a longer delay (2s) between requests for free tier safety
-            for (const msg of toAnalyze) {
-              const msgIndex = finalMsgs.findIndex(m => m.id === msg.id);
-              const history = finalMsgs.slice(0, msgIndex).map(m => ({ role: m.role, content: m.content }));
-              
-              try {
-                const analysis = await analyzeMessage(msg.content, msg.role, traitProfile, history);
-                
-                // Only update if analysis succeeded and isn't a fallback 'API Key Missing' etc
-                if (analysis && analysis.intent !== 'API 키 누락' && analysis.intent !== '분석 실패') {
-                  await updateDoc(doc(db, 'users', auth.currentUser!.uid, 'conversations', id, 'messages', msg.id), {
-                    analysis
-                  });
-                  setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, analysis } : m));
-                }
-                
-                // Safety delay
-                await new Promise(resolve => setTimeout(resolve, 2000));
-              } catch (e: any) {
-                console.error(`Failed to analyze msg ${msg.id}:`, e);
-                // If it's a 429, wait even longer
-                if (e?.message?.includes('429')) {
-                   await new Promise(resolve => setTimeout(resolve, 10000));
-                }
-              }
-            }
-          } catch (err) {
-            console.error("Auto-analysis error:", err);
-          } finally {
-            setAutoAnalyzing(false);
-          }
-        }
-      } catch (err) {
-        console.error('Error in ChatPage fetchData:', err);
+    // 2. Real-time Conversation listener
+    const convRef = doc(db, 'users', auth.currentUser.uid, 'conversations', id);
+    const unsubConv = onSnapshot(convRef, (snap) => {
+      if (snap.exists()) {
+        setConversation({ id: snap.id, ...snap.data() } as Conversation);
       }
-    };
+    });
 
-    fetchData();
-  }, [id]);
+    // 3. Real-time Messages listener
+    const msgQuery = query(
+      collection(db, 'users', auth.currentUser.uid, 'conversations', id, 'messages'),
+      orderBy('order', 'asc')
+    );
+    const unsubMsgs = onSnapshot(msgQuery, (snapshot) => {
+      const msgs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Message));
+      
+      // Fallback for old messages without order (only if needed)
+      if (msgs.length > 0 && msgs[0].order === undefined) {
+         // Sort locally instead of re-querying for simplicity if order is missing
+         msgs.sort((a, b) => {
+           const timeA = a.createdAt?.toMillis?.() || 0;
+           const timeB = b.createdAt?.toMillis?.() || 0;
+           return timeA - timeB;
+         });
+      }
+      setMessages(msgs);
+    });
+
+    return () => {
+      unsubConv();
+      unsubMsgs();
+    };
+  }, [id, auth.currentUser]);
+
+  // Effect to handle auto-analysis of messages that don't have analysis yet
+  useEffect(() => {
+    const toAnalyze = messages.filter(m => !m.analysis);
+    if (toAnalyze.length > 0 && !autoAnalyzing && userProfile) {
+      const startAnalysis = async () => {
+        setAutoAnalyzing(true);
+        try {
+          let successCount = 0;
+          let failCount = 0;
+
+          for (const msg of toAnalyze) {
+            const msgIndex = messages.findIndex(m => m.id === msg.id);
+            const history = messages.slice(0, msgIndex).map(m => ({ role: m.role, content: m.content }));
+            
+            try {
+              const analysis = await analyzeMessage(msg.content, msg.role, userProfile.traitProfile, history);
+              if (analysis && analysis.intent !== 'API 키 누락' && analysis.intent !== '분석 실패') {
+                await updateDoc(doc(db, 'users', auth.currentUser!.uid, 'conversations', id!, 'messages', msg.id), {
+                  analysis
+                });
+                successCount++;
+              } else {
+                failCount++;
+              }
+              await new Promise(resolve => setTimeout(resolve, 1500));
+            } catch (e) {
+              console.error("Auto analysis step failed:", e);
+              failCount++;
+              await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+          }
+
+          if (successCount > 0) {
+            alert(`대화 분석이 완료되었습니다. (${successCount}개의 메시지)`);
+          }
+          if (failCount > 0) {
+            alert('일부 메시지 분석에 실패했습니다. 나중에 다시 시도해주세요.');
+          }
+        } finally {
+          setAutoAnalyzing(false);
+        }
+      };
+      startAnalysis();
+    }
+  }, [messages, userProfile, autoAnalyzing, id]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -126,51 +132,37 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     if (!inputText.trim() || !id || !auth.currentUser) return;
+
     setAnalyzing(true);
     const textToSend = inputText;
     const currentRole = role;
     setInputText('');
 
     try {
-      // 1. Save to Firestore first (Immediate UI feedback)
+      const now = new Date();
+      // 1. Save to Firestore first (The "Save First" requirement)
       const msgData: any = {
         role: currentRole,
         content: textToSend,
-        senderName: currentRole === 'user' ? '나' : '상대방',
+        senderName: currentRole === 'user' ? (userProfile?.name || '나') : '상대방',
         order: messages.length,
-        createdAt: serverTimestamp(),
+        createdAt: now,
       };
 
-      const msgRef = await addDoc(collection(db, 'users', auth.currentUser.uid, 'conversations', id, 'messages'), msgData);
+      await addDoc(collection(db, 'users', auth.currentUser.uid, 'conversations', id, 'messages'), msgData);
       
-      const newMsg = { id: msgRef.id, ...msgData, createdAt: new Date() };
-      setMessages(prev => [...prev, newMsg]);
-      setAnalyzing(false);
-
-      // 2. Update last message timestamp
+      // Update last message timestamp on the conversation content
       await updateDoc(doc(db, 'users', auth.currentUser.uid, 'conversations', id), {
-        lastMessageAt: serverTimestamp()
+        lastMessageAt: now
       });
 
-      // 3. Analyze with AI in the background
-      const analysisPromise = (async () => {
-        try {
-          const history = messages.map(m => ({ role: m.role, content: m.content }));
-          const analysis = await analyzeMessage(textToSend, currentRole, userProfile?.traitProfile, history);
-          
-          await updateDoc(doc(db, 'users', auth.currentUser!.uid, 'conversations', id, 'messages', msgRef.id), {
-            analysis
-          });
-          
-          setMessages(prev => prev.map(m => m.id === msgRef.id ? { ...m, analysis } : m));
-        } catch (err) {
-          console.error("Analysis background error:", err);
-        }
-      })();
-
-    } catch (err) {
-      console.error("Error sending message:", err);
+      // Clear processing states - the background effect will handle analysis
       setAnalyzing(false);
+
+    } catch (err: any) {
+      console.error("Error saving message:", err);
+      setAnalyzing(false);
+      alert('메시지 저장 중 오류가 발생했습니다: ' + (err.message || '알 수 없는 오류'));
     }
   };
 
@@ -329,6 +321,13 @@ function MessageBubble({ msg }: { msg: Message }) {
               <span className="text-[10px] text-gray-700 font-bold leading-tight">
                 {msg.analysis.intent}
               </span>
+              {msg.analysis.empathyScore !== undefined && (
+                <div className="flex gap-1 ml-auto">
+                   <div className="text-[8px] px-1 bg-red-50 text-red-500 rounded font-bold">E {msg.analysis.empathyScore}</div>
+                   <div className="text-[8px] px-1 bg-blue-50 text-blue-500 rounded font-bold">C {msg.analysis.clarityScore}</div>
+                   <div className="text-[8px] px-1 bg-green-50 text-green-500 rounded font-bold">R {msg.analysis.resilienceScore}</div>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <div className="w-1 bg-[#e5e5d8] rounded-full shrink-0" />
