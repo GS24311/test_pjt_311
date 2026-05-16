@@ -83,7 +83,7 @@ export default function ProfilePage() {
       const now = new Date();
       
       const updateData = {
-        'traitProfile.archetype': analysis.archetype,
+        'traitProfile.archetype': analysis.archetype || '관찰하는 탐구자',
         'traitProfile.attachmentStyle': analysis.attachmentStyle,
         'traitProfile.communicationStyle': analysis.communicationStyle,
         'traitProfile.triggers': analysis.triggers,
@@ -92,8 +92,9 @@ export default function ProfilePage() {
         'traitProfile.lastUpdatedAt': now.toISOString()
       };
       
-      console.log("Saving trait profile update...");
+      console.log("Saving trait profile update - Payload:", updateData);
       await updateDoc(userRef, updateData);
+      console.log("Profile update success!");
       
       setCalculationLog(prev => [...prev, "[SYSTEM] 성향 프로필 동기화 완료."]);
 
