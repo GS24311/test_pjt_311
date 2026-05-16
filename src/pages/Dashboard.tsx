@@ -143,11 +143,10 @@ export default function Dashboard() {
       if (snap.exists()) setUserProfile(snap.data());
     }).catch(err => console.error("Profile fetch error:", err));
 
-    // Real-time listener for conversations
-    // Using createdAt as a more stable primary sort for newly created ones
+    // Using lastMessageAt as it's more likely to exist on legacy and new docs
     const q = query(
       collection(db, 'users', auth.currentUser.uid, 'conversations'),
-      orderBy('createdAt', 'desc'),
+      orderBy('lastMessageAt', 'desc'),
       limit(20)
     );
 
@@ -266,7 +265,7 @@ export default function Dashboard() {
       setTempMessages([]);
       setInputText('');
       
-      alert('대화가 목록에 추가되었습니다. 분석이 순차적으로 진행됩니다!');
+      alert('대화가 목록에 추가되었습니다!');
     } catch (error: any) {
       console.error('Error starting conversation:', error);
       alert('분석을 시작할 수 없습니다. 나중에 다시 시도해주세요.');
@@ -596,7 +595,7 @@ export default function Dashboard() {
                       ) : (
                         <>
                           <Sparkles className="w-4 h-4" />
-                          <span className="text-[10px] font-bold uppercase tracking-widest">저장하기 & 분석하기</span>
+                          <span className="text-[10px] font-bold uppercase tracking-widest">대화 저장하기</span>
                         </>
                       )}
                     </button>

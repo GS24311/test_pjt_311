@@ -109,14 +109,17 @@ export async function getTraitAnalysis(messages: { role: string, content: string
 
     **중요: 모든 분석 결과는 반드시 한국어로 작성해야 합니다.**
     Return:
-    1. attachmentStyle: 애착 유형 (회피형, 불안형, 안정형, 공포회피형 등 한국어로 작성)
-    2. communicationStyle: 대화 스타일 요약 (한국어로 작성)
-    3. triggers: 주요 갈등 유발 요인 리스트 (한국어로 작성)
-    4. advice: 장기적인 관계 성장을 위한 조언 (한국어로 작성)
-    5. stats: 평균 수치 분석 (0-100)
-       - empathy: 평균 공감도
-       - clarity: 평균 명확성
-       - resilience: 평균 유연성
+    1. archetype: 사용자만의 대화 정체성을 나타내는 짧은 별명 (예: '침착한 관찰자', '열정적인 해결사' 등 한국어로 작성)
+    2. attachmentStyle: 애착 유형 (회피형, 불안형, 안정형, 공포회피형 등 한국어로 작성)
+    3. communicationStyle: 대화 스타일 요약 (한국어로 작성)
+    4. triggers: 주요 갈등 유발 요인 리스트 (한국어로 작성)
+    5. advice: 장기적인 관계 성장을 위한 조언 (한국어로 작성)
+    6. scores: 5가지 핵심 커뮤니케이션 수치 (0-100)
+       - empathy: 공감력
+       - logic: 논리성 및 명확성
+       - flexibility: 유연성 및 수용성
+       - initiative: 주도성 및 능동성
+       - control: 자기 조절 및 침착함
 
     Return as JSON.
   `;
@@ -129,20 +132,23 @@ export async function getTraitAnalysis(messages: { role: string, content: string
       responseSchema: {
         type: Type.OBJECT,
         properties: {
+          archetype: { type: Type.STRING },
           attachmentStyle: { type: Type.STRING },
           communicationStyle: { type: Type.STRING },
           triggers: { type: Type.ARRAY, items: { type: Type.STRING } },
           advice: { type: Type.STRING },
-          stats: {
+          scores: {
             type: Type.OBJECT,
             properties: {
               empathy: { type: Type.NUMBER },
-              clarity: { type: Type.NUMBER },
-              resilience: { type: Type.NUMBER }
+              logic: { type: Type.NUMBER },
+              flexibility: { type: Type.NUMBER },
+              initiative: { type: Type.NUMBER },
+              control: { type: Type.NUMBER }
             }
           }
         },
-        required: ["attachmentStyle", "communicationStyle", "triggers", "advice", "stats"]
+        required: ["archetype", "attachmentStyle", "communicationStyle", "triggers", "advice", "scores"]
       }
     }
   }));

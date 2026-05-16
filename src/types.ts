@@ -2,12 +2,20 @@ export interface UserProfile {
   uid: string;
   name: string;
   email: string;
-  traitProfile: {
+  traitProfile?: {
+    archetype?: string;
     attachmentStyle: string;
     communicationStyle: string;
     triggers: string[];
-    notes: string;
     advice?: string;
+    lastUpdatedAt?: string;
+    scores?: {
+      empathy: number;
+      logic: number;
+      flexibility: number;
+      initiative: number;
+      control: number;
+    };
   };
   settings?: {
     realTimeCoaching: boolean;

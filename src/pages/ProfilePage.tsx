@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react';
 import { doc, getDoc, updateDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { UserProfile, Message } from '../types';
+import { UserProfile } from '../types';
 import { getTraitAnalysis } from '../lib/gemini';
 import { motion } from 'motion/react';
+import { 
+  Radar, 
+  RadarChart, 
+  PolarGrid, 
+  PolarAngleAxis, 
+  ResponsiveContainer 
+} from 'recharts';
 import { 
   Brain, 
   Target, 
@@ -12,9 +19,11 @@ import {
   CheckCircle2,
   Sparkles,
   Heart,
-  Quote,
   User as UserIcon,
-  ShieldCheck
+  ShieldCheck,
+  Zap,
+  Fingerprint,
+  Info
 } from 'lucide-react';
 
 export default function ProfilePage() {
@@ -71,33 +80,43 @@ export default function ProfilePage() {
       setCalculationLog(prev => [...prev, "[SYSTEM] 성향 가중치 테이블 업데이트 시작."]);
       
       const userRef = doc(db, 'users', auth.currentUser.uid);
+      const now = new Date();
+      
       const updateData = {
+        'traitProfile.archetype': analysis.archetype,
         'traitProfile.attachmentStyle': analysis.attachmentStyle,
         'traitProfile.communicationStyle': analysis.communicationStyle,
         'traitProfile.triggers': analysis.triggers,
         'traitProfile.advice': analysis.advice,
-        'traitProfile.lastUpdatedAt': new Date().toISOString()
+        'traitProfile.scores': analysis.scores,
+        'traitProfile.lastUpdatedAt': now.toISOString()
       };
       
+      console.log("Saving trait profile update...");
       await updateDoc(userRef, updateData);
       
       setCalculationLog(prev => [...prev, "[SYSTEM] 성향 프로필 동기화 완료."]);
 
       setTimeout(() => {
-        setProfile(prev => prev ? {
-          ...prev,
-          traitProfile: {
-            ...prev.traitProfile,
-            ...analysis,
-            lastUpdatedAt: updateData['traitProfile.lastUpdatedAt']
-          }
-        } : null);
+        setProfile(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            traitProfile: {
+              ...(prev.traitProfile || {}),
+              ...analysis,
+              lastUpdatedAt: now.toISOString()
+            }
+          };
+        });
         setAnalyzing(false);
         alert('성향 프로필이 최신 데이터로 업데이트되었습니다!');
       }, 1000);
 
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error("Profile update failed:", err);
+      setCalculationLog(prev => [...prev, `[ERROR] 저장 실패: ${err.message}`]);
+      alert('저장 중에 문제가 발생했습니다. 권한 설정을 확인하거나 나중에 다시 시도해주세요.');
       setAnalyzing(false);
     }
   };
@@ -138,32 +157,37 @@ export default function ProfilePage() {
     shareAnonymousData: false
   };
 
+  const chartData = profile?.traitProfile?.scores ? [
+    { subject: '공감력', A: profile.traitProfile.scores.empathy, fullMark: 100 },
+    { subject: '논리성', A: profile.traitProfile.scores.logic, fullMark: 100 },
+    { subject: '유연성', A: profile.traitProfile.scores.flexibility, fullMark: 100 },
+    { subject: '능동성', A: profile.traitProfile.scores.initiative, fullMark: 100 },
+    { subject: '자기조절', A: profile.traitProfile.scores.control, fullMark: 100 },
+  ] : [];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-12">
       <div className="flex flex-col items-center text-center space-y-4">
-        <div className="w-24 h-24 bg-white rounded-[32px] border-2 border-primary flex items-center justify-center p-2 shadow-xl">
-           <div className="w-full h-full bg-bg-base rounded-[24px] flex items-center justify-center">
-              <UserIcon className="w-10 h-10 text-primary" />
-           </div>
+        <div className="relative">
+          <div className="w-24 h-24 bg-white rounded-[32px] border-2 border-primary flex items-center justify-center p-2 shadow-xl">
+             <div className="w-full h-full bg-bg-base rounded-[24px] flex items-center justify-center">
+                <UserIcon className="w-10 h-10 text-primary" />
+             </div>
+          </div>
+          <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-secondary rounded-xl flex items-center justify-center shadow-lg border-2 border-white">
+             <Fingerprint className="w-4 h-4 text-white" />
+          </div>
         </div>
         <div>
           <h1 className="text-3xl font-display font-bold">성향 프로필</h1>
           <div className="flex items-center justify-center gap-2 mt-1">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">{profile?.email}</p>
-            {profile?.traitProfile?.lastUpdatedAt && (
-              <>
-                <div className="w-1 h-1 bg-gray-300 rounded-full" />
-                <p className="text-[10px] font-bold text-primary/60 uppercase tracking-widest">
-                  Updated {new Date(profile.traitProfile.lastUpdatedAt).toLocaleDateString()}
-                </p>
-              </>
-            )}
           </div>
         </div>
       </div>
 
       {analyzing ? (
-        <div className="py-12 space-y-6">
+        <div className="py-8 space-y-6">
            <div className="bg-gray-900 border border-white/10 rounded-[32px] p-8 font-mono text-[11px] text-green-400 overflow-hidden h-56 flex flex-col-reverse shadow-2xl relative">
               <div className="absolute top-4 right-6 flex items-center gap-2">
                  <RefreshCw className="w-3 h-3 animate-spin text-green-500" />
@@ -180,56 +204,114 @@ export default function ProfilePage() {
                 </motion.div>
               ))}
            </div>
-           <p className="text-center text-xs text-gray-400 font-medium animate-pulse">
-              AI가 최근 대화 패턴을 정밀하게 재구성하고 있습니다...
-           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          <TraitCard 
-            label="성향 1: 애착 유형" 
-            value={profile?.traitProfile?.attachmentStyle || '분석 중...'} 
-            icon={Heart}
-            color="bg-primary text-white"
-          />
-          <TraitCard 
-            label="성향 2: 소통 스타일" 
-            value={profile?.traitProfile?.communicationStyle || '분석 중...'} 
-            icon={Target}
-            color="bg-white text-secondary border border-[#e5e5d8]"
-          />
-          
-          {profile?.traitProfile?.advice && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-8 bg-accent rounded-[40px] border border-[#e5e5d8] border-dashed"
-            >
-              <div className="flex items-center gap-2 mb-4 text-primary">
-                <Sparkles className="w-4 h-4" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">성장 추천 제안</span>
-              </div>
-              <p className="text-gray-700 leading-relaxed text-sm">
-                "{profile.traitProfile.advice}"
-              </p>
-            </motion.div>
-          )}
+        <div className="space-y-6">
+          {/* Archetype Highlight */}
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-primary p-8 rounded-[40px] text-white text-center shadow-2xl relative overflow-hidden group"
+          >
+             <div className="absolute top-[-20%] right-[-10%] w-40 h-40 bg-white/10 rounded-full blur-3xl" />
+             <div className="absolute bottom-[-20%] left-[-10%] w-40 h-40 bg-secondary/20 rounded-full blur-3xl opacity-50" />
+             
+             <div className="relative z-10 space-y-2">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                   <Zap className="w-4 h-4 text-yellow-300" />
+                   <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-70">Communication Archetype</span>
+                </div>
+                <h2 className="text-4xl font-display font-black leading-none">
+                  {profile?.traitProfile?.archetype || '관찰하는 탐구자'}
+                </h2>
+                <div className="pt-4 flex justify-center gap-4">
+                   <div className="px-3 py-1 bg-white/10 rounded-full text-[10px] font-bold border border-white/10 backdrop-blur-sm">
+                      #{profile?.traitProfile?.attachmentStyle || '분석 중'}
+                   </div>
+                </div>
+             </div>
+          </motion.div>
 
-          {profile?.traitProfile?.triggers && profile.traitProfile.triggers.length > 0 && (
-            <div className="pt-2">
-               <div className="flex items-center gap-2 mb-3">
-                 <AlertCircle className="w-3.5 h-3.5 text-red-400" />
-                 <h4 className="text-[10px] font-bold uppercase tracking-widest text-gray-400">나의 취약점 (Trigger Points)</h4>
+          {/* 5-Dimensional Scores */}
+          <div className="bg-white p-8 rounded-[40px] border border-[#e5e5d8] shadow-sm">
+             <div className="flex items-center justify-between mb-8">
+                <div>
+                   <h3 className="text-lg font-bold text-gray-800">대화 역량 분석</h3>
+                   <p className="text-[10px] text-gray-400 font-medium font-mono uppercase">Multi-Dimensional Mapping</p>
+                </div>
+                <div className="w-10 h-10 bg-accent rounded-2xl flex items-center justify-center">
+                   <Brain className="w-5 h-5 text-secondary" />
+                </div>
+             </div>
+             
+             {profile?.traitProfile?.scores ? (
+               <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={chartData}>
+                      <PolarGrid stroke="#e5e5d8" />
+                      <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fontWeight: 700, fill: '#666' }} />
+                      <Radar
+                        name="Competency"
+                        dataKey="A"
+                        stroke="#FF7D7D"
+                        fill="#FF7D7D"
+                        fillOpacity={0.4}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
                </div>
-               <div className="flex flex-wrap gap-2">
-                 {profile.traitProfile.triggers.map((t, i) => (
-                   <span key={i} className="px-3 py-1.5 bg-red-50 text-red-500 rounded-full text-[11px] font-bold border border-red-100 italic">
-                     #{t}
-                   </span>
-                 ))}
-               </div>
-            </div>
-          )}
+             ) : (
+                <div className="h-64 flex items-center justify-center border-2 border-dashed border-accent rounded-[32px] text-gray-400 text-xs text-center font-medium px-12">
+                   데이터가 충분하지 않습니다.<br/>최근 대화를 바탕으로 성향을 업데이트해 보세요.
+                </div>
+             )}
+          </div>
+
+          <div className="space-y-4">
+            <TraitCard 
+              label="소통 스타일 핵심" 
+              value={profile?.traitProfile?.communicationStyle || '분석 중...'} 
+              icon={Target}
+              color="bg-white text-secondary border border-[#e5e5d8]"
+            />
+            
+            {profile?.traitProfile?.advice && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-8 bg-accent rounded-[40px] border border-[#e5e5d8] border-dashed"
+              >
+                <div className="flex items-center gap-2 mb-4 text-primary">
+                  <Sparkles className="w-4 h-4" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest">성장 추천 제안</span>
+                </div>
+                <p className="text-gray-700 leading-relaxed text-sm bg-white/50 p-4 rounded-2xl border border-white shadow-sm">
+                  "{profile.traitProfile.advice}"
+                </p>
+              </motion.div>
+            )}
+
+            {profile?.traitProfile?.triggers && profile.traitProfile.triggers.length > 0 && (
+              <div className="p-8 bg-white border border-[#e5e5d8] rounded-[40px] shadow-sm">
+                 <div className="flex items-center gap-2 mb-6">
+                   <AlertCircle className="w-4 h-4 text-red-500" />
+                   <h4 className="text-xs font-bold uppercase tracking-widest text-gray-800">심리적 트리거 (Trigger Points)</h4>
+                 </div>
+                 <div className="flex flex-wrap gap-2">
+                   {profile.traitProfile.triggers.map((t, i) => (
+                     <div key={i} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-2xl text-[11px] font-bold border border-red-100 italic transition-hover hover:bg-red-100">
+                       <Zap className="w-3 h-3" />
+                       #{t}
+                     </div>
+                   ))}
+                 </div>
+                 <div className="mt-6 p-4 bg-gray-50 rounded-2xl flex gap-3 items-start">
+                    <Info className="w-4 h-4 text-gray-300 shrink-0 mt-0.5" />
+                    <p className="text-[10px] text-gray-500 leading-relaxed">트리거를 인지하는 것만으로도 대화 중 감정의 폭주를 12% 가량 억제할 수 있습니다.</p>
+                 </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

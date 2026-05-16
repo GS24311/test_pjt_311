@@ -19,53 +19,38 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'name']) 
         && data.uid == request.auth.uid
         && data.name is string && data.name.size() <= 100
-        && (!data.keys().contains('email') || data.email == null || (data.email is string && data.email.size() <= 256))
-        && (!data.keys().contains('createdAt') || data.createdAt == request.time || data.createdAt is timestamp)
-        && (!data.keys().contains('lastLoginAt') || data.lastLoginAt == request.time || data.lastLoginAt is timestamp)
-        // Allow optional profile fields
-        && (!data.keys().contains('traitProfile') || data.traitProfile is map)
-        && (!data.keys().contains('settings') || data.settings is map);
+        && (!data.keys().contains('traitProfile') || data.traitProfile is map);
     }
 
     function isValidConversation(data) {
       return data.keys().hasAll(['userId', 'title', 'status'])
         && data.userId == request.auth.uid
-        && data.title is string && data.title.size() <= 500
-        && data.status in ['active', 'resolved']
-        && (!data.keys().contains('createdAt') || data.createdAt == request.time || data.createdAt is timestamp)
-        && (!data.keys().contains('lastMessageAt') || data.lastMessageAt == request.time || data.lastMessageAt is timestamp);
+        && data.title is string && data.title.size() <= 600;
     }
 
     function isValidMessage(data) {
       return data.keys().hasAll(['role', 'content', 'senderName'])
         && data.role in ['user', 'partner']
-        && data.content is string && data.content.size() <= 20000
-        && data.senderName is string && data.senderName.size() <= 100
-        && (!data.keys().contains('order') || data.order is int || data.order is float)
-        && (!data.keys().contains('createdAt') || data.createdAt == request.time || data.createdAt is timestamp)
-        && (!data.keys().contains('analysis') || data.analysis is map);
+        && data.content is string && data.content.size() <= 20000;
     }
 
     // Routes
     match /users/{userId} {
-      allow get: if isOwner(userId) && isValidId(userId);
-      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
-      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) 
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'traitProfile', 'settings', 'email', 'lastLoginAt']);
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming());
 
       match /conversations/{conversationId} {
-        allow list, get: if isOwner(userId) && isValidId(userId);
-        allow create: if isOwner(userId) && isValidId(userId) && isValidId(conversationId) && isValidConversation(incoming());
-        allow update: if isOwner(userId) && isValidId(userId) && isValidId(conversationId)
-          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'status', 'lastMessageAt']);
-        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(conversationId);
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidConversation(incoming());
+        allow update: if isOwner(userId) && isValidConversation(incoming());
+        allow delete: if isOwner(userId);
 
         match /messages/{messageId} {
-          allow list, get: if isOwner(userId) && isValidId(userId);
-          allow create: if isOwner(userId) && isValidId(userId) && isValidId(messageId) && isValidMessage(incoming());
-          allow update: if isOwner(userId) && isValidId(userId) && isValidId(messageId) && isValidMessage(incoming())
-            && incoming().diff(existing()).affectedKeys().hasOnly(['analysis']);
-          allow delete: if isOwner(userId) && isValidId(userId) && isValidId(messageId);
+          allow list, get: if isOwner(userId);
+          allow create: if isOwner(userId) && isValidMessage(incoming());
+          allow update: if isOwner(userId) && isValidMessage(incoming());
+          allow delete: if isOwner(userId);
         }
       }
     }
