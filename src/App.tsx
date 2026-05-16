@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { onAuthStateChanged, User, signOut, getRedirectResult } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db, testConnection } from './lib/firebase';
@@ -9,16 +9,24 @@ import {
   Brain, 
   LogOut, 
   Sparkles,
-  History
+  History,
+  RefreshCw
 } from 'lucide-react';
 
-// Internal Components
-import Dashboard from './pages/Dashboard';
-import ChatPage from './pages/ChatPage';
-import ProfilePage from './pages/ProfilePage';
-import LandingPage from './pages/LandingPage';
-import ReplayPage from './pages/ReplayPage';
-import InsightsPage from './pages/InsightsPage';
+// Lazy load pages for better mobile performance
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ChatPage = lazy(() => import('./pages/ChatPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const ReplayPage = lazy(() => import('./pages/ReplayPage'));
+const InsightsPage = lazy(() => import('./pages/InsightsPage'));
+
+const PageLoader = () => (
+  <div className="flex-1 flex flex-col items-center justify-center p-20 gap-4">
+    <RefreshCw className="w-8 h-8 text-primary/40 animate-spin" />
+    <p className="text-[10px] font-bold text-gray-300 uppercase tracking-widest">페이지 준비 중...</p>
+  </div>
+);
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -82,16 +90,18 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-bg-base text-[#1a1a1a] font-sans selection:bg-primary selection:text-white">
-        <Routes>
-          <Route path="/" element={user ? <Navigate to="/dashboard" /> : <LandingPage />} />
-          <Route path="/dashboard" element={user ? <Layout user={user}><Dashboard /></Layout> : <Navigate to="/" />} />
-          <Route path="/chat/:id" element={user ? <Layout user={user}><ChatPage /></Layout> : <Navigate to="/" />} />
-          <Route path="/profile" element={user ? <Layout user={user}><ProfilePage /></Layout> : <Navigate to="/" />} />
-          <Route path="/replay" element={user ? <Layout user={user}><ReplayPage /></Layout> : <Navigate to="/" />} />
-          <Route path="/replay/:id" element={user ? <Layout user={user}><ReplayPage /></Layout> : <Navigate to="/" />} />
-          <Route path="/insights" element={user ? <Layout user={user}><InsightsPage /></Layout> : <Navigate to="/" />} />
-        </Routes>
+      <div className="min-h-[100dvh] bg-bg-base text-[#1a1a1a] font-sans selection:bg-primary selection:text-white flex flex-col">
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={user ? <Navigate to="/dashboard" /> : <LandingPage />} />
+            <Route path="/dashboard" element={user ? <Layout user={user}><Dashboard /></Layout> : <Navigate to="/" />} />
+            <Route path="/chat/:id" element={user ? <Layout user={user}><ChatPage /></Layout> : <Navigate to="/" />} />
+            <Route path="/profile" element={user ? <Layout user={user}><ProfilePage /></Layout> : <Navigate to="/" />} />
+            <Route path="/replay" element={user ? <Layout user={user}><ReplayPage /></Layout> : <Navigate to="/" />} />
+            <Route path="/replay/:id" element={user ? <Layout user={user}><ReplayPage /></Layout> : <Navigate to="/" />} />
+            <Route path="/insights" element={user ? <Layout user={user}><InsightsPage /></Layout> : <Navigate to="/" />} />
+          </Routes>
+        </Suspense>
       </div>
     </BrowserRouter>
   );
@@ -99,6 +109,7 @@ export default function App() {
 
 function Layout({ children, user }: { children: React.ReactNode, user: User }) {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -106,17 +117,17 @@ function Layout({ children, user }: { children: React.ReactNode, user: User }) {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-[#fcfcf9]">
+    <div className="flex flex-col h-full min-h-[100dvh] bg-[#fcfcf9] relative">
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto pb-24 pt-4 px-4 md:px-8">
+      <main className="flex-1 overflow-y-auto pb-32 pt-4 px-4 md:px-8">
         <AnimatePresence mode="wait">
           <motion.div
-            key={window.location.pathname}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.3 }}
-            className="max-w-md mx-auto w-full min-h-full flex flex-col"
+            key={location.pathname}
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="max-w-md mx-auto w-full min-h-full flex flex-col will-change-transform"
           >
             {children}
           </motion.div>

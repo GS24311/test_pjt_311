@@ -23,16 +23,16 @@ function MissionCard() {
     <motion.div 
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      whileHover={{ y: -5 }}
-      className={`bg-white p-7 rounded-[40px] border-2 relative overflow-hidden group transition-all duration-700 ${completed ? 'border-primary shadow-xl shadow-primary/5' : 'border-[#e5e5d8] shadow-sm'}`}
+      whileHover={{ y: -3 }}
+      className={`bg-white p-7 rounded-[40px] border-2 relative overflow-hidden group transition-[border-color,box-shadow,transform] duration-500 will-change-transform ${completed ? 'border-primary shadow-xl shadow-primary/5' : 'border-[#e5e5d8] shadow-sm'}`}
     >
       <AnimatePresence>
         {showReward && (
           <motion.div 
             initial={{ opacity: 0, scale: 0.5, y: 10 }}
-            animate={{ opacity: 1, scale: 1.2, y: -40 }}
+            animate={{ opacity: 1, scale: 1.1, y: -40 }}
             exit={{ opacity: 0, scale: 0.8 }}
-            className="absolute top-1/4 left-1/2 -translate-x-1/2 bg-primary text-white px-6 py-3 rounded-full font-bold text-sm shadow-2xl z-20 flex items-center gap-2"
+            className="absolute top-1/4 left-1/2 -translate-x-1/2 bg-primary text-white px-6 py-3 rounded-full font-bold text-sm shadow-2xl z-20 flex items-center gap-2 pointer-events-none"
           >
             <Sparkles className="w-4 h-4" />
             +150 XP 획득!
@@ -40,21 +40,21 @@ function MissionCard() {
         )}
       </AnimatePresence>
 
-      <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:opacity-[0.08] group-hover:rotate-12 transition-all duration-700">
+      <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:opacity-[0.06] group-hover:rotate-6 transition-all duration-500 pointer-events-none">
         <Target className="w-40 h-40 text-primary" />
       </div>
       
       <div className="flex justify-between items-center mb-6 relative z-10">
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-500 ${completed ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-secondary/10 text-secondary'}`}>
+          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-colors duration-300 ${completed ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-secondary/10 text-secondary'}`}>
             {completed ? <CheckCircle2 className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
           </div>
           <div>
-            <h4 className={`text-sm font-bold transition-colors ${completed ? 'text-primary' : 'text-gray-800'}`}>
+            <h4 className={`text-sm font-bold transition-colors duration-300 ${completed ? 'text-primary' : 'text-gray-800'}`}>
               {completed ? '오늘의 퀘스트 완료' : '오늘의 마음 퀘스트'}
             </h4>
             <div className="flex items-center gap-1.5 mt-0.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${completed ? 'bg-primary' : 'bg-secondary animate-pulse'}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${completed ? 'bg-primary' : 'bg-secondary'}`} />
               <span className="text-[9px] font-bold text-gray-400 tracking-wider">DAILY QUEST</span>
             </div>
           </div>
@@ -84,10 +84,11 @@ function MissionCard() {
         </div>
         <div className="h-2 bg-gray-100 rounded-full overflow-hidden relative">
           <motion.div 
-            initial={{ width: '40%' }}
-            animate={{ width: completed ? '100%' : '40%' }}
+            initial={{ scaleX: 0.4 }}
+            animate={{ scaleX: completed ? 1 : 0.4 }}
             transition={{ duration: 1, ease: "circOut" }}
-            className={`h-full rounded-full ${completed ? 'bg-primary' : 'bg-secondary'}`}
+            style={{ originX: 0 }}
+            className={`h-full w-full rounded-full ${completed ? 'bg-primary' : 'bg-secondary'}`}
           />
         </div>
         
@@ -386,9 +387,9 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4">
-        <RefreshCw className="w-8 h-8 text-primary animate-spin" />
-        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">데이터를 불러오는 중...</p>
+      <div className="flex flex-col items-center justify-center py-40 gap-4">
+        <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest animate-pulse">데이터 동기화 중...</p>
       </div>
     );
   }

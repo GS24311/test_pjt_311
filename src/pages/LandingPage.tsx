@@ -35,7 +35,8 @@ export default function LandingPage() {
              setError("리다이렉트 로그인에 실패했습니다. 브라우저 설정에서 팝업을 허용해주세요.");
           }
         } else if (popupErr.code === 'auth/unauthorized-domain') {
-          setError("도메인 미승인: Firebase 콘솔의 '승인된 도메인'에 현재 주소를 추가해야 합니다.");
+          const currentHost = window.location.hostname;
+          setError(`도메인 미승인: Firebase 콘솔의 Auth 설정에서 '${currentHost}'를 '승인된 도메인'에 추가해야 합니다. (설정 > Authentication > Settings > Authorized domains)`);
         } else if (popupErr.code === 'auth/operation-not-allowed') {
           setError("Google 로그인이 비활성화되어 있습니다. Firebase Auth 설정에서 Google을 활성화해주세요.");
         } else if (popupErr.code === 'auth/network-request-failed') {
