@@ -17,24 +17,50 @@ export default function LandingPage() {
     setError(null);
     try {
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       
+      // Standalone(PWA) or Mobile browsers often block popups or handle them poorly
+      if (isStandalone || isMobile) {
+        setAuthMethod('redirect');
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return; // The page will redirect
+        } catch (redirectErr: any) {
+          console.error("Redirect login error:", redirectErr);
+          setAuthMethod('popup');
+          // Fallback to popup if redirect fails
+        }
+      }
+
+      setAuthMethod('popup');
       try {
         await signInWithPopup(auth, googleProvider);
       } catch (popupErr: any) {
-        console.error("Login error:", popupErr);
+        console.error("Popup login error:", popupErr);
         if (popupErr.code === 'auth/unauthorized-domain') {
           setError("도메인이 승인되지 않았습니다. Firebase 콘솔에서 현재 사이트 주소를 '승인된 도메인'에 추가해주세요.");
-        } else if (popupErr.code === 'auth/popup-blocked' && isStandalone) {
-          await signInWithRedirect(auth, googleProvider);
+        } else if (popupErr.code === 'auth/popup-blocked') {
+          setError("팝업이 차단되었습니다. 브라우저 설정에서 팝업을 허용해주세요. 혹은 하단의 '재시도' 버튼을 눌러보세요.");
+        } else if (popupErr.code === 'auth/cancelled-popup-request') {
+          // Ignore cancellation
         } else {
-          setError("로그인 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+          setError(`로그인 중 오류가 발생했습니다 (${popupErr.code}). 잠시 후 다시 시도해주세요.`);
         }
       }
     } catch (err: any) {
       setError("로그인 중 예기치 못한 오류가 발생했습니다.");
     } finally {
-      setLoading(false);
+      if (authMethod !== 'redirect') {
+        setLoading(false);
+      }
     }
+  };
+
+  const [authMethod, setAuthMethod] = useState<'popup' | 'redirect'>('popup');
+
+  const retryWithOtherMethod = () => {
+    setError(null);
+    signInWithRedirect(auth, googleProvider);
   };
 
   const handleGuestLogin = async () => {
@@ -93,13 +119,22 @@ export default function LandingPage() {
               disabled={loading}
               className="w-full bg-primary text-white py-4 rounded-2xl font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-3"
             >
-              {loading ? "연결 중..." : (
+              {loading ? (authMethod === 'redirect' ? "페이지 이동 중..." : "연결 중...") : (
                 <>
                   <img src="https://www.google.com/favicon.ico" className="w-4 h-4 brightness-0 invert" alt="" />
                   Google 계정으로 시작
                 </>
               )}
             </button>
+
+            {error && (
+               <button 
+                 onClick={retryWithOtherMethod}
+                 className="text-[10px] text-gray-400 underline decoration-dotted underline-offset-4 hover:text-primary transition-colors"
+               >
+                 다른 방식으로 시도하기 (Redirect 활용)
+               </button>
+            )}
 
             <button
               onClick={handleGuestLogin}
