@@ -17,40 +17,29 @@ export default function LandingPage() {
     setError(null);
     try {
       const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       
-      // PWAs in standalone mode MUST use redirect as popups won't work correctly
-      if (isStandalone) {
-        setAuthMethod('redirect');
-        try {
-          await signInWithRedirect(auth, googleProvider);
-          return;
-        } catch (redirectErr: any) {
-          console.error("Redirect login error:", redirectErr);
-          setError("로그인 페이지로 이동하는 중 오류가 발생했습니다. 브라우저에서 '앱 열기' 버튼을 눌러보거나, 일반 브라우저로 접속해주세요.");
-        }
-      }
-
-      // For standard mobile and desktop, prefer popup
-      setAuthMethod('popup');
+      // Try popup first as it's more stable for state management in many environments
       try {
+        setAuthMethod('popup');
         await signInWithPopup(auth, googleProvider);
       } catch (popupErr: any) {
         console.error("Auth error:", popupErr);
-        if (popupErr.code === 'auth/popup-blocked') {
-          // If popup is blocked, try redirect as fallback
+        
+        // If popup is blocked (common in PWA/Standalone), fallback to redirect automatically
+        if (popupErr.code === 'auth/popup-blocked' || isStandalone) {
           setAuthMethod('redirect');
           try {
             await signInWithRedirect(auth, googleProvider);
+            return;
           } catch (reErr: any) {
-            setError("팝업과 리다이렉트가 모두 차단되었습니다. 브라우저 설정에서 팝업을 허용해주세요.");
+             setError("리다이렉트 로그인에 실패했습니다. 브라우저 설정에서 팝업을 허용해주세요.");
           }
         } else if (popupErr.code === 'auth/unauthorized-domain') {
-          setError("도메인이 승인되지 않았습니다. Firebase 콘솔에서 현재 사이트 주소를 '승인된 도메인'에 추가해주세요.");
+          setError("도메인 미승인: Firebase 콘솔의 '승인된 도메인'에 현재 주소를 추가해야 합니다.");
+        } else if (popupErr.code === 'auth/operation-not-allowed') {
+          setError("Google 로그인이 비활성화되어 있습니다. Firebase Auth 설정에서 Google을 활성화해주세요.");
         } else if (popupErr.code === 'auth/network-request-failed') {
-          setError("네트워크 연결이 불안정합니다. 방화벽이나 보안 프로그램에 의해 'firebaseapp.com' 또는 'web.app' 도메인이 차단되었을 수 있습니다.");
-        } else if (popupErr.code === 'auth/internal-error' && popupErr.message?.includes('invalid response')) {
-          setError("서버에서 잘못된 응답을 받았습니다. 브라우저의 캐시를 삭제하거나 시크릿 모드에서 다시 시도해주세요.");
+          setError("네트워크 오류가 발생했습니다. 보안 연결(SSL) 설정을 확인해주세요.");
         } else {
           setError(`로그인 오류 (${popupErr.code}): ${popupErr.message}`);
         }
